@@ -64,6 +64,7 @@ require (
 	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.9.0
 	github.com/Azure/azure-sdk-for-go/sdk/azidentity v1.4.0
 	github.com/DelineaXPM/dsv-sdk-go/v2 v2.1.0
+	github.com/Nike-Inc/cerberus-go-client/v3 v3.0.11
 	github.com/akeylesslabs/akeyless-go/v3 v3.5.0
 	github.com/alibabacloud-go/darabonba-openapi/v2 v2.0.4
 	github.com/alibabacloud-go/kms-20160120/v3 v3.1.0
@@ -96,6 +97,7 @@ require (
 	github.com/alibabacloud-go/tea-utils v1.4.5 // indirect
 	github.com/alibabacloud-go/tea-xml v1.1.3 // indirect
 	github.com/bgentry/go-netrc v0.0.0-20140422174119-9fd32a8b3d3d // indirect
+	github.com/cenkalti/backoff v2.2.1+incompatible // indirect
 	github.com/clbanning/mxj/v2 v2.7.0 // indirect
 	github.com/danieljoos/wincred v1.2.0 // indirect
 	github.com/gabriel-vasile/mimetype v1.4.3 // indirect
@@ -109,6 +111,7 @@ require (
 	github.com/hashicorp/go-uuid v1.0.3 // indirect
 	github.com/matttproud/golang_protobuf_extensions/v2 v2.0.0 // indirect
 	github.com/sirupsen/logrus v1.9.3 // indirect
+	github.com/taskcluster/httpbackoff v1.0.0 // indirect
 	github.com/tjfoc/gmsm v1.4.1 // indirect
 	github.com/zalando/go-keyring v0.2.3 // indirect
 	golang.org/x/sync v0.5.0 // indirect
