@@ -189,12 +189,7 @@ func (c *cerberus) traverseAndFind(startPath string, predicate func(string) bool
 }
 
 func (c *cerberus) readCerberusSecretProperties(ref esv1beta1.ExternalSecretDataRemoteRef) (map[string][]byte, error) {
-	fullPath := c.prependSDBPath(ref.Key)
-	if ref.Version != "" {
-		fullPath = fullPath + fmt.Sprintf("?versionId=%s", ref.Version)
-	}
-
-	properties, err := c.readAllPropsForPath(fullPath)
+	properties, err := c.readAllPropsForPath(ref)
 	if err != nil {
 		return nil, err
 	}
@@ -225,8 +220,15 @@ func (c *cerberus) deleteCerberusSecret(path string) error {
 	return err
 }
 
-func (c *cerberus) readAllPropsForPath(path string) (map[string][]byte, error) {
-	secrets, err := c.client.Secret().Read(path)
+func (c *cerberus) readAllPropsForPath(ref esv1beta1.ExternalSecretDataRemoteRef) (map[string][]byte, error) {
+	data := make(map[string][]string)
+	if ref.Version != "" {
+		data["versionId"] = []string{ref.Version}
+	}
+
+	var secrets, err = c.client.Secret().ReadWithData(c.prependSDBPath(ref.Key), data)
+
+	c.client.Secret()
 	if err != nil {
 		return nil, err
 	}

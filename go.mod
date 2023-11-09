@@ -60,11 +60,13 @@ require (
 
 require github.com/1Password/connect-sdk-go v1.5.3
 
+replace github.com/Nike-Inc/cerberus-go-client/v3 v3.0.6 => github.com/SzymonZebrowski/cerberus-go-client/v3 v3.0.6-0.20231108212346-0f05d7f97193
+
 require (
 	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.9.0
 	github.com/Azure/azure-sdk-for-go/sdk/azidentity v1.4.0
 	github.com/DelineaXPM/dsv-sdk-go/v2 v2.1.0
-	github.com/Nike-Inc/cerberus-go-client/v3 v3.0.11
+	github.com/Nike-Inc/cerberus-go-client/v3 v3.0.6
 	github.com/akeylesslabs/akeyless-go/v3 v3.5.0
 	github.com/alibabacloud-go/darabonba-openapi/v2 v2.0.4
 	github.com/alibabacloud-go/kms-20160120/v3 v3.1.0
