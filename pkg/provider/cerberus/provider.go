@@ -24,6 +24,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	esv1beta1 "github.com/external-secrets/external-secrets/apis/externalsecrets/v1beta1"
+	awsauth "github.com/external-secrets/external-secrets/pkg/provider/aws/auth"
 	cerberusauth "github.com/external-secrets/external-secrets/pkg/provider/cerberus/auth"
 	"github.com/external-secrets/external-secrets/pkg/provider/cerberus/util"
 )
@@ -39,8 +40,7 @@ func (p *Provider) NewClient(ctx context.Context, store esv1beta1.GenericStore, 
 	if err != nil {
 		return nil, err
 	}
-	// TODO refactor so that we can reuse AWS's code without copying it
-	sess, err := cerberusauth.New(ctx, store, kube, namespace, cerberusauth.DefaultSTSProvider, cerberusauth.DefaultJWTProvider)
+	sess, err := cerberusauth.New(ctx, store, kube, namespace, awsauth.DefaultSTSProvider, awsauth.DefaultJWTProvider)
 	if err != nil {
 		return nil, err
 	}
@@ -50,20 +50,20 @@ func (p *Provider) NewClient(ctx context.Context, store esv1beta1.GenericStore, 
 		return nil, err
 	}
 
-	cerberusClient, err := cerberussdk.NewClient(authMethod.WithCredentials(sess.Config.Credentials), nil)
+	sdkclient, err := cerberussdk.NewClient(authMethod.WithCredentials(sess.Config.Credentials), nil)
 	if err != nil {
 		return nil, err
 	}
 
-	sdbList, err := cerberusClient.SDB().List()
+	sdbList, err := sdkclient.SDB().List()
 	if err != nil {
 		return nil, err
 	}
 
 	for _, sdb := range sdbList {
-		if strings.ToLower(sdb.Name) == strings.ToLower(cerberusProvider.SDB) {
+		if strings.EqualFold(sdb.Name, cerberusProvider.SDB) {
 			return &cerberus{
-				client: cerberusClient,
+				client: &cerberusClient{*sdkclient},
 				sdb:    sdb,
 			}, nil
 		}

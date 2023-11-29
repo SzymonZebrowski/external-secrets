@@ -25,30 +25,21 @@ import (
 	"github.com/aws/aws-sdk-go/aws/request"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/sts"
-	"github.com/aws/aws-sdk-go/service/sts/stsiface"
 	"github.com/spf13/pflag"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/kubernetes"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	ctrlcfg "sigs.k8s.io/controller-runtime/pkg/client/config"
 
 	esv1beta1 "github.com/external-secrets/external-secrets/apis/externalsecrets/v1beta1"
 	"github.com/external-secrets/external-secrets/pkg/cache"
 	"github.com/external-secrets/external-secrets/pkg/feature"
+	awsauth "github.com/external-secrets/external-secrets/pkg/provider/aws/auth"
 	"github.com/external-secrets/external-secrets/pkg/provider/cerberus/util"
 )
 
-// Config contains configuration to create a new AWS provider.
-type Config struct {
-	AssumeRole string
-	Region     string
-	APIRetries int
-}
-
 var (
-	log                = ctrl.Log.WithName("provider").WithName("aws")
+	log                = ctrl.Log.WithName("provider").WithName("cerberus")
 	enableSessionCache bool
 	sessionCache       *cache.Cache[*session.Session]
 )
@@ -58,13 +49,11 @@ const (
 	audienceAnnotation   = "eks.amazonaws.com/audience"
 	defaultTokenAudience = "sts.amazonaws.com"
 
-	errInvalidClusterStoreMissingAKIDNamespace = "invalid ClusterSecretStore: missing AWS AccessKeyID Namespace"
-	errInvalidClusterStoreMissingSAKNamespace  = "invalid ClusterSecretStore: missing AWS SecretAccessKey Namespace"
-	errFetchAKIDSecret                         = "could not fetch accessKeyID secret: %w"
-	errFetchSAKSecret                          = "could not fetch SecretAccessKey secret: %w"
-	errFetchSTSecret                           = "could not fetch SessionToken secret: %w"
-	errMissingSAK                              = "missing SecretAccessKey"
-	errMissingAKID                             = "missing AccessKeyID"
+	errFetchAKIDSecret = "could not fetch accessKeyID secret: %w"
+	errFetchSAKSecret  = "could not fetch SecretAccessKey secret: %w"
+	errFetchSTSecret   = "could not fetch SessionToken secret: %w"
+	errMissingSAK      = "missing SecretAccessKey"
+	errMissingAKID     = "missing AccessKeyID"
 )
 
 func init() {
@@ -81,7 +70,7 @@ func init() {
 // * service-account token authentication via AssumeRoleWithWebIdentity
 // * static credentials from a Kind=Secret, optionally with doing a AssumeRole.
 // * sdk default provider chain, see: https://docs.aws.amazon.com/sdk-for-java/v1/developer-guide/credentials.html#credentials-default
-func New(ctx context.Context, store esv1beta1.GenericStore, kube client.Client, namespace string, assumeRoler STSProvider, jwtProvider jwtProviderFactory) (*session.Session, error) {
+func New(ctx context.Context, store esv1beta1.GenericStore, kube client.Client, namespace string, assumeRoler awsauth.STSProvider, jwtProvider jwtProviderFactory) (*session.Session, error) {
 	prov, err := util.GetCerberusProvider(store)
 	if err != nil {
 		return nil, err
@@ -108,7 +97,7 @@ func New(ctx context.Context, store esv1beta1.GenericStore, kube client.Client, 
 		}
 	}
 
-	config := aws.NewConfig().WithEndpointResolver(ResolveEndpoint())
+	config := aws.NewConfig().WithEndpointResolver(awsauth.ResolveEndpoint())
 	if creds != nil {
 		config.WithCredentials(creds)
 	}
@@ -155,55 +144,6 @@ func New(ctx context.Context, store esv1beta1.GenericStore, kube client.Client, 
 		}
 	}
 	log.Info("using aws session", "region", *sess.Config.Region, "external id", sessExtID, "credentials", creds)
-	return sess, nil
-}
-
-// NewSession creates a new aws session based on the provided store
-// it uses the following authentication mechanisms in order:
-// * service-account token authentication via AssumeRoleWithWebIdentity
-// * static credentials from a Kind=Secret, optionally with doing a AssumeRole.
-// * sdk default provider chain, see: https://docs.aws.amazon.com/sdk-for-java/v1/developer-guide/credentials.html#credentials-default
-func NewGeneratorSession(ctx context.Context, auth esv1beta1.AWSAuth, role, region string, kube client.Client, namespace string, assumeRoler STSProvider, jwtProvider jwtProviderFactory) (*session.Session, error) {
-	var creds *credentials.Credentials
-	var err error
-
-	// use credentials via service account token
-	jwtAuth := auth.JWTAuth
-	if jwtAuth != nil {
-		creds, err = credsFromServiceAccount(ctx, auth, region, false, kube, namespace, jwtProvider)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	// use credentials from sercretRef
-	secretRef := auth.SecretRef
-	if secretRef != nil {
-		log.V(1).Info("using credentials from secretRef")
-		creds, err = credsFromSecretRef(ctx, auth, false, kube, namespace)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	config := aws.NewConfig().WithEndpointResolver(ResolveEndpoint())
-	if creds != nil {
-		config.WithCredentials(creds)
-	}
-	if region != "" {
-		config.WithRegion(region)
-	}
-
-	sess, err := getAWSSession(config, false, "", "", "", "")
-	if err != nil {
-		return nil, err
-	}
-
-	if role != "" {
-		stsclient := assumeRoler(sess)
-		sess.Config.WithCredentials(stscreds.NewCredentialsWithClient(stsclient, role))
-	}
-	log.Info("using aws session", "region", *sess.Config.Region, "credentials", creds)
 	return sess, nil
 }
 
@@ -309,49 +249,6 @@ func credsFromServiceAccount(ctx context.Context, auth esv1beta1.AWSAuth, region
 }
 
 type jwtProviderFactory func(name, namespace, roleArn string, aud []string, region string) (credentials.Provider, error)
-
-// DefaultJWTProvider returns a credentials.Provider that calls the AssumeRoleWithWebidentity
-// controller-runtime/client does not support TokenRequest or other subresource APIs
-// so we need to construct our own client and use it to fetch tokens.
-func DefaultJWTProvider(name, namespace, roleArn string, aud []string, region string) (credentials.Provider, error) {
-	cfg, err := ctrlcfg.GetConfig()
-	if err != nil {
-		return nil, err
-	}
-	clientset, err := kubernetes.NewForConfig(cfg)
-	if err != nil {
-		return nil, err
-	}
-	handlers := defaults.Handlers()
-	handlers.Build.PushBack(request.WithAppendUserAgent("external-secrets"))
-	awscfg := aws.NewConfig().WithEndpointResolver(ResolveEndpoint())
-	if region != "" {
-		awscfg.WithRegion(region)
-	}
-	sess, err := session.NewSessionWithOptions(session.Options{
-		Config:            *awscfg,
-		SharedConfigState: session.SharedConfigDisable,
-		Handlers:          handlers,
-	})
-	if err != nil {
-		return nil, err
-	}
-	tokenFetcher := &authTokenFetcher{
-		Namespace:      namespace,
-		Audiences:      aud,
-		ServiceAccount: name,
-		k8sClient:      clientset.CoreV1(),
-	}
-
-	return stscreds.NewWebIdentityRoleProviderWithOptions(
-		sts.New(sess), roleArn, "external-secrets-provider-aws", tokenFetcher), nil
-}
-
-type STSProvider func(*session.Session) stsiface.STSAPI
-
-func DefaultSTSProvider(sess *session.Session) stsiface.STSAPI {
-	return sts.New(sess)
-}
 
 // getAWSSession checks if an AWS session should be reused
 // it returns the aws session or an error.

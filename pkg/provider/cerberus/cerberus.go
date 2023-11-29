@@ -1,25 +1,76 @@
+/*
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
 package cerberus
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"strings"
 
-	"github.com/Nike-Inc/cerberus-go-client/v3/api"
+	cerberussdkapi "github.com/Nike-Inc/cerberus-go-client/v3/api"
 	cerberussdk "github.com/Nike-Inc/cerberus-go-client/v3/cerberus"
 	"github.com/aws/aws-sdk-go/aws"
+	vaultapi "github.com/hashicorp/vault/api"
 	v1 "k8s.io/api/core/v1"
-	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 
 	esv1beta1 "github.com/external-secrets/external-secrets/apis/externalsecrets/v1beta1"
 	"github.com/external-secrets/external-secrets/pkg/find"
 	"github.com/external-secrets/external-secrets/pkg/provider/cerberus/util"
 )
 
+const (
+	versionIDKey = "versionId"
+)
+
 type cerberus struct {
-	client *cerberussdk.Client
-	sdb    *api.SafeDepositBox
+	client AuthenticatedSecretReader
+	sdb    *cerberussdkapi.SafeDepositBox
+}
+
+type AuthenticatedSecretReader interface {
+	ReadSecret(string, map[string][]string) (*vaultapi.Secret, error)
+	WriteSecret(string, map[string]interface{}) (*vaultapi.Secret, error)
+	ListSecret(string) (*vaultapi.Secret, error)
+	DeleteSecret(string) (*vaultapi.Secret, error)
+	IsAuthenticated() bool
+}
+
+type cerberusClient struct {
+	cerberussdk.Client
+}
+
+func (c *cerberusClient) ReadSecret(path string, data map[string][]string) (*vaultapi.Secret, error) {
+	return c.Secret().ReadWithData(path, data)
+}
+
+func (c *cerberusClient) WriteSecret(path string, data map[string]interface{}) (*vaultapi.Secret, error) {
+	return c.Secret().Write(path, data)
+}
+
+func (c *cerberusClient) ListSecret(path string) (*vaultapi.Secret, error) {
+	return c.Secret().List(path)
+}
+
+func (c *cerberusClient) DeleteSecret(path string) (*vaultapi.Secret, error) {
+	return c.Secret().Delete(path)
+}
+
+func (c *cerberusClient) IsAuthenticated() bool {
+	return c.Authentication.IsAuthenticated()
 }
 
 var globalMutex = util.MutexMap{}
@@ -33,8 +84,9 @@ func (c *cerberus) GetSecret(ctx context.Context, ref esv1beta1.ExternalSecretDa
 	if err != nil {
 		return nil, err
 	}
+
 	if ref.Property == "" {
-		// workaround so that json.Marshal does not do base64 on []byte :/
+		// workaround so that json.Marshal does not do base64 on []byte
 		stringProps := map[string]string{}
 		for k, v := range properties {
 			stringProps[k] = string(v)
@@ -50,7 +102,7 @@ func (c *cerberus) GetSecret(ctx context.Context, ref esv1beta1.ExternalSecretDa
 	return property, nil
 }
 
-func (c *cerberus) PushSecret(_ context.Context, value []byte, _ v1.SecretType, _ *apiextensionsv1.JSON, remoteRef esv1beta1.PushRemoteRef) error {
+func (c *cerberus) PushSecret(_ context.Context, secret *v1.Secret, remoteRef esv1beta1.PushSecretData) error {
 	if remoteRef.GetProperty() == "" {
 		return fmt.Errorf("property must be set")
 	}
@@ -66,12 +118,12 @@ func (c *cerberus) PushSecret(_ context.Context, value []byte, _ v1.SecretType, 
 		return err
 	}
 
-	properties[remoteRef.GetProperty()] = value
+	properties[remoteRef.GetProperty()] = secret.Data[remoteRef.GetSecretKey()]
 
 	return c.overwriteCerberusSecret(properties, remoteRef.GetRemoteKey())
 }
 
-func (c *cerberus) DeleteSecret(_ context.Context, remoteRef esv1beta1.PushRemoteRef) error {
+func (c *cerberus) DeleteSecret(_ context.Context, remoteRef esv1beta1.PushSecretRemoteRef) error {
 	if remoteRef.GetProperty() == "" {
 		return fmt.Errorf("property must be set")
 	}
@@ -101,7 +153,7 @@ func (c *cerberus) Validate() (esv1beta1.ValidationResult, error) {
 		return esv1beta1.ValidationResultError, nil
 	}
 
-	if c.client.Authentication.IsAuthenticated() {
+	if c.client.IsAuthenticated() {
 		return esv1beta1.ValidationResultReady, nil
 	}
 
@@ -136,6 +188,7 @@ func (c *cerberus) GetAllSecrets(ctx context.Context, ref esv1beta1.ExternalSecr
 	results := make(map[string][]byte)
 	for _, path := range allSecretPaths {
 		data, err := c.GetSecret(ctx, esv1beta1.ExternalSecretDataRemoteRef{Key: path})
+
 		if err != nil {
 			return nil, err
 		}
@@ -156,7 +209,7 @@ func (c *cerberus) prependSDBPath(key string) string {
 func (c *cerberus) traverseAndFind(startPath string, predicate func(string) bool) ([]string, error) {
 	var collector []string
 
-	list, err := c.client.Secret().List(c.prependSDBPath(startPath))
+	list, err := c.client.ListSecret(c.prependSDBPath(startPath))
 	if err != nil {
 		return nil, err
 	}
@@ -178,10 +231,8 @@ func (c *cerberus) traverseAndFind(startPath string, predicate func(string) bool
 				return nil, err
 			}
 			collector = append(collector, subtreeCollector...)
-		} else {
-			if predicate(key) {
-				collector = append(collector, fmt.Sprintf("%s%s", startPath, key))
-			}
+		} else if predicate(key) {
+			collector = append(collector, fmt.Sprintf("%s%s", startPath, key))
 		}
 	}
 
@@ -205,9 +256,20 @@ func (c *cerberus) overwriteCerberusSecret(properties map[string][]byte, path st
 		stringProperties[k] = string(v)
 	}
 
-	written, err := c.client.Secret().Write(fullPath, stringProperties)
+	shouldUpdate := false
 
-	_ = written
+	existing, err := c.client.ReadSecret(fullPath, nil)
+	if err != nil {
+		return err
+	}
+
+	if existing != nil && !reflect.DeepEqual(existing.Data, stringProperties) {
+		shouldUpdate = true
+	}
+
+	if existing == nil || shouldUpdate {
+		_, err = c.client.WriteSecret(fullPath, stringProperties)
+	}
 
 	return err
 }
@@ -215,7 +277,7 @@ func (c *cerberus) overwriteCerberusSecret(properties map[string][]byte, path st
 func (c *cerberus) deleteCerberusSecret(path string) error {
 	fullPath := c.prependSDBPath(path)
 
-	_, err := c.client.Secret().Delete(fullPath)
+	_, err := c.client.DeleteSecret(fullPath)
 
 	return err
 }
@@ -223,12 +285,11 @@ func (c *cerberus) deleteCerberusSecret(path string) error {
 func (c *cerberus) readAllPropsForPath(ref esv1beta1.ExternalSecretDataRemoteRef) (map[string][]byte, error) {
 	data := make(map[string][]string)
 	if ref.Version != "" {
-		data["versionId"] = []string{ref.Version}
+		data[versionIDKey] = []string{ref.Version}
 	}
 
-	var secrets, err = c.client.Secret().ReadWithData(c.prependSDBPath(ref.Key), data)
+	var secrets, err = c.client.ReadSecret(c.prependSDBPath(ref.Key), data)
 
-	c.client.Secret()
 	if err != nil {
 		return nil, err
 	}
