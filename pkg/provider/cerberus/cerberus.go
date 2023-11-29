@@ -182,7 +182,7 @@ func (c *cerberus) GetAllSecrets(ctx context.Context, ref esv1beta1.ExternalSecr
 		return matcher.MatchName(name)
 	})
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("error when listing secrets: %w", err)
 	}
 
 	results := make(map[string][]byte)
@@ -242,7 +242,7 @@ func (c *cerberus) traverseAndFind(startPath string, predicate func(string) bool
 func (c *cerberus) readCerberusSecretProperties(ref esv1beta1.ExternalSecretDataRemoteRef) (map[string][]byte, error) {
 	properties, err := c.readAllPropsForPath(ref)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("error when reading the secret: %w", err)
 	}
 
 	return properties, nil

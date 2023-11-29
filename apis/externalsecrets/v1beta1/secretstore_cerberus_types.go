@@ -14,7 +14,7 @@ limitations under the License.
 
 package v1beta1
 
-// CerberusProvider configures a store to sync secrets with AWS.
+// CerberusProvider configures a store to sync secrets with Cerberus.
 type CerberusProvider struct {
 	// Auth defines the information necessary to authenticate against AWS
 	// if not set aws sdk will infer credentials from your environment
@@ -41,7 +41,7 @@ type CerberusProvider struct {
 	// AWS External ID set on assumed IAM roles
 	ExternalID string `json:"externalID,omitempty"`
 
-	// AWS Region to be used for the provider
+	// Region to be used for the provider
 	Region string `json:"region"`
 
 	// URL of Cerberus crypto-vault

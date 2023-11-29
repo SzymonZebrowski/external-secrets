@@ -2166,7 +2166,7 @@ spec:
                         - vaultUrl
                       type: object
                     cerberus:
-                      description: CerberusProvider configures a store to sync secrets with AWS.
+                      description: CerberusProvider configures a store to sync secrets with Cerberus.
                       properties:
                         additionalRoles:
                           description: AdditionalRoles is a chained list of Role ARNs which the SecretManager provider will sequentially assume before assuming Role
@@ -2248,7 +2248,7 @@ spec:
                           description: AWS External ID set on assumed IAM roles
                           type: string
                         region:
-                          description: AWS Region to be used for the provider
+                          description: Region to be used for the provider
                           type: string
                         role:
                           description: Role is a Role ARN which the provider will assume
@@ -6222,7 +6222,7 @@ spec:
                         - vaultUrl
                       type: object
                     cerberus:
-                      description: CerberusProvider configures a store to sync secrets with AWS.
+                      description: CerberusProvider configures a store to sync secrets with Cerberus.
                       properties:
                         additionalRoles:
                           description: AdditionalRoles is a chained list of Role ARNs which the SecretManager provider will sequentially assume before assuming Role
@@ -6304,7 +6304,7 @@ spec:
                           description: AWS External ID set on assumed IAM roles
                           type: string
                         region:
-                          description: AWS Region to be used for the provider
+                          description: Region to be used for the provider
                           type: string
                         role:
                           description: Role is a Role ARN which the provider will assume
